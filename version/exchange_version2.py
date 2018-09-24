@@ -9,6 +9,7 @@ import sys
 import socket
 import json
 import time
+import math
 # ~~~~~============== CONFIGURATION  ==============~~~~~
 # replace REPLACEME with your team name!
 team_name="UNREGISTERED"
@@ -20,7 +21,7 @@ test_mode = True
 # 0 is prod-like
 # 1 is slower
 # 2 is empty
-test_exchange_index=1
+test_exchange_index=0
 prod_exchange_hostname="production"
 Data = {}
 
@@ -54,8 +55,8 @@ def main():
     # exponential explosion in pending messages. Please, don't do that!
     print("The exchange replied:", hello_from_exchange, file=sys.stderr)
     symbols  = read_from_exchange(exchange)["symbols"]
-    for symbol in symbols:
-        Data[symbol] = []
+    # for symbol in symbols:
+    #     Data[symbol] = []
     print (Data)
     # number to symbols. 
     symbol_dict = {}
@@ -66,15 +67,15 @@ def main():
 
 
     #section 2 variable
-    BABAZ_FV = [0,0]
-    BABA_FV = 0
-    BABZ_FV = 0
-    # BABZ_FV = 0
-    #
+    BABAZ_FV = [(0,0),(0,0)]
     while True:
         # Get data of market
-        lastest_data = read_from_exchange(exchange)
-        print (lastest_data)
+        try:
+            lastest_data = read_from_exchange(exchange)
+        except:
+            print("Unexpected error:", sys.exc_info()[0])
+            raise
+        # print (lastest_data)
         if lastest_data["type"] == "book" :
             symbol = lastest_data["symbol"]
             Data[symbol] = lastest_data
@@ -90,52 +91,44 @@ def main():
             order_count += 1 
             
             # Part 2 Fair trade BABA,BABZ:
-
             if symbol == "BABZ" or symbol == "BABA": 
                 BABAZ = Data[symbol]
-                print(BABAZ)
-                min_value = float("inf")
-                max_value = -float("inf")
+                # print(BABAZ)
+                sell_value = float("inf")
+                buy_value = -float("inf")
                 for price, amount in BABAZ["sell"] :
-                    min_value = min(min_value,price)
+                    sell_value = min(sell_value,price)
                 for price, amount in BABAZ["buy"] :
-                    max_value = max(min_value,price)
-                mean = (min_value+max_value)/2
+                    buy_value = max(buy_value,price)
+                mean = (sell_value+buy_value)/2
                 # Base case
-                if BABAZ_FV[0] == 0:
-                    BABAZ_FV = [mean,mean]
-                elif symbol == "BABA":
-                    BABAZ_FV[0] == mean
+                if BABAZ_FV[0] == (0,0):
+                    BABAZ_FV[0] = (sell_value,buy_value)
+                elif BABAZ_FV[0] == (0,0):
+                    BABAZ_FV[1] = (sell_value,buy_value)
                 else:
-                    BABA_FV[1] = mean
-                
-                
-                fv = (BABAZ_FV[0] + BABAZ_FV[1])/2
-                # IF BABA is higher:
-                if BABAZ_FV[0] >= BABA_FV[1]:
-                    if (BABA_FV[1]+fv)/2 >(BABA_FV[0]+fv)/2 +10:
-                        sell_to = ["BABZ", (BABA_FV[1]+fv)/2]
-                        buy_from = ["BABA", (BABA_FV[0]+fv)/2]
-                        trade = {"type": "add", "order_id":order_count , "symbol": buy_from[0], "dir": "BUY", "price": buy_from[1], "size": 10}
-                        write_to_exchange()
-                        trade = {"type": "add", "order_id":order_count , "symbol": sell_from[0], "dir": "SELL", "price": sell_from[1], "size": 10}
-                        write_to_exchange()
-                else:
-                    sell_to = ["BABA", (BABA_FV[0]+fv)/2]
-                    buy_from = ["BABZ", (BABA_FV[1]+fv)/2]
-                    trade = {"type": "add", "order_id":order_count , "symbol": buy_from[0], "dir": "BUY", "price": buy_from[1], "size": 10}
-                    write_to_exchange()
-                    trade = {"type": "add", "order_id":order_count , "symbol": sell_from[0], "dir": "SELL", "price": sell_from[1], "size": 10}
-                    write_to_exchange()
-                #BABA -> BABZ  for $BABZ
-                
-                
-                
-                     
-
-
+                    if symbol == "BABA":
+                        BABAZ_FV[0] = (sell_value,buy_value)
+                    else:
+                        BABAZ_FV[1] = (sell_value,buy_value)
                     
-                
+                    BABA = BABAZ_FV[0]
+                    BABZ = BABAZ_FV[1]
+                    # completely encompassing
+                    if BABA[0] >= BABZ[0] and BABA[1] <= BABZ[1]:
+                        fv = (BABZ[0]+BABZ[1])/2
+                    #BABZ is less.
+                    elif BABA[0] > BABZ[0]:
+                        fv = (BABZ[1]+BABA[0])/2
+                    else:
+                        fv = (BABZ[0]+BABA[1])/2
+                    #fv of BABZ
+                    trade = {"type": "add", "order_id":order_count , "symbol": "BABA", "dir": "BUY", "price": fv+1, "size": 10}
+                    order_count +=1
+                    write_to_exchange(exchange,trade)
+                    trade = {"type": "add", "order_id":order_count , "symbol": "BABA", "dir": "SELL", "price": fv-1, "size": 10}
+                    write_to_exchange(exchange,trade)
+                    order_count+=1
 
 
 if __name__ == "__main__":
